@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<package >
+    <metadata>
+        <id>OpenSlide.Wrapper</id>
+        <authors>Smart In Media</authors>
+        <owners>Smart In Media</owners>
+        <version>2.0.0</version>
+        <description>OpenSlide.Wrapper</description>
+        <tags>OpenSlide.Wrapper</tags>
+        <dependencies>
+            <group targetFramework=".net8.0">
+                <dependency id="PooledGrowableBufferHelper" version="1.0.14" />
+                <dependency id="SixLabors.ImageSharp" version="3.1.6" />
+                <dependency id="System.Buffers" version="4.6.0" />
+            </group>
+        </dependencies>
+    </metadata>
+    <files>
+        <!-- The net8.0 OpenSlide.Wrapper -->
+        <file src="bin\$configuration$\net8.0\OpenSlide.Wrapper.dll" target="lib\net8.0"/>
+
+        <!-- The net8.0 build -->
+        <file src="targets\OpenSlide.Wrapper.targets" target="build\net80" />
+
+        <!-- Include Openslide libs -->
+        <file src="bin\$configuration$\net8.0\libs\libcairo-2.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libdicom-1.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libexpat-1.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libffi-8.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libfontconfig-1.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libfreetype-6.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libgdk_pixbuf-2.0-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libgio-2.0-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libglib-2.0-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libgmodule-2.0-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libgobject-2.0-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libharfbuzz-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libjpeg-62.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libopenjp2.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libopenslide-1.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libpixman-1-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libpng16-16.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libsharpyuv-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libsqlite3-0.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libtiff-6.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libwebp-7.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libxml2-2.dll" target="runtimes\native"/>
+        <file src="bin\$configuration$\net8.0\libs\libz1.dll" target="runtimes\native"/>
+    </files>
+</package>
