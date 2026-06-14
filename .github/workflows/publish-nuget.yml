@@ -1,12 +1,15 @@
 name: Publish to NuGet
 
-# Publishes SmartInVenture.StorageLib to nuget.org.
+# Publishes SmartInVenture.StorageLib to nuget.org using Trusted Publishing (OIDC).
+# No API key/secret is stored — GitHub Actions proves its identity to nuget.org via
+# OIDC and receives a short-lived token. This requires a Trusted Publisher Policy on
+# nuget.org bound to:
+#   Package Owner = smartinventure, Repository Owner = smartinventure,
+#   Repository = StorageLib, Workflow File = publish-nuget.yml
 #
 # Two ways to trigger:
 #   1. Create a GitHub Release with a tag like "v1.0.1"  -> publishes version 1.0.1
 #   2. Run this workflow manually (Actions tab) and type the version.
-#
-# Requires a repository secret named NUGET_API_KEY (see README / repo settings).
 
 on:
   release:
@@ -16,6 +19,10 @@ on:
       version:
         description: "Version to publish (e.g. 1.0.1)"
         required: true
+
+permissions:
+  id-token: write   # required for Trusted Publishing (OIDC token exchange)
+  contents: read
 
 jobs:
   publish:
@@ -41,6 +48,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Publishing version: $VERSION"
 
+      - name: NuGet login (Trusted Publishing / OIDC)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: smartinventure   # nuget.org package owner
+
       - name: Restore
         run: dotnet restore StorageLib/StorageLib.csproj
 
@@ -56,5 +69,5 @@ jobs:
         run: >
           dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
           --source https://api.nuget.org/v3/index.json
-          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
           --skip-duplicate
