@@ -42,11 +42,11 @@ jobs:
           echo "Publishing version: $VERSION"
 
       - name: Restore
-        run: dotnet restore StorageLib.csproj
+        run: dotnet restore StorageLib/StorageLib.csproj
 
       - name: Pack
         run: >
-          dotnet pack StorageLib.csproj
+          dotnet pack StorageLib/StorageLib.csproj
           --configuration Release
           --no-restore
           -p:Version=${{ steps.ver.outputs.version }}
