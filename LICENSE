@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
--------------------------------------------------------------------------------
-THIRD-PARTY COMPONENTS
-
-The `libs/` directory contains prebuilt native libraries used by the optional
-OpenSlide-based connector (e.g. libopenslide, cairo, glib, freetype, libjpeg,
-libpng, openjpeg and their dependencies). These are third-party components
-distributed under their own respective licenses (LGPL/MIT/zlib/BSD and others).
-They are included only for runtime convenience; their licenses govern their use
-and redistribution. See https://openslide.org/ for details.

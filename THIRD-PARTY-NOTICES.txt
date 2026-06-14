@@ -1,0 +1,38 @@
+THIRD-PARTY NOTICES
+===================
+
+This product, SmartInVenture.StorageLib, is licensed under the MIT License
+(see the LICENSE file). It additionally bundles and/or depends on third-party
+components that are distributed under their own respective licenses.
+
+Native libraries (in the `libs/` directory)
+-------------------------------------------
+The `libs/` directory contains prebuilt native libraries used by the optional
+OpenSlide-based connector, including (but not limited to):
+
+  - OpenSlide (libopenslide)        - LGPL-2.1
+  - cairo (libcairo)                - LGPL-2.1 / MPL-1.1
+  - GLib (libglib, libgio, ...)     - LGPL-2.1+
+  - FreeType (libfreetype)          - FTL / GPL-2.0
+  - libjpeg                         - IJG License
+  - libpng                          - PNG Reference Library License (zlib-like)
+  - OpenJPEG (libopenjp2)           - BSD-2-Clause
+  - libexpat                        - MIT
+  - libffi                          - MIT
+  - HarfBuzz, Pixman, Fontconfig, gdk-pixbuf, libdicom, libsharpyuv, and others
+
+These components are included only for runtime convenience. Their respective
+licenses govern their use and redistribution. See https://openslide.org/ and the
+upstream projects for the authoritative license texts.
+
+Managed (NuGet) dependencies
+----------------------------
+  - Azure.Storage.Blobs                       - MIT
+  - AWSSDK.S3                                  - Apache-2.0
+  - SSH.NET                                    - MIT
+  - SixLabors.ImageSharp                       - Six Labors Split License / Apache-2.0
+  - Microsoft.Extensions.* / System.*         - MIT
+  - System.IO.Abstractions                     - MIT
+  - PooledGrowableBufferHelper                 - MIT
+
+Refer to each package's listing on nuget.org for the authoritative license.

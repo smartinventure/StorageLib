@@ -1,0 +1,60 @@
+name: Publish to NuGet
+
+# Publishes SmartInVenture.StorageLib to nuget.org.
+#
+# Two ways to trigger:
+#   1. Create a GitHub Release with a tag like "v1.0.1"  -> publishes version 1.0.1
+#   2. Run this workflow manually (Actions tab) and type the version.
+#
+# Requires a repository secret named NUGET_API_KEY (see README / repo settings).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.0.1)"
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"     # strip leading "v" from the tag
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing version: $VERSION"
+
+      - name: Restore
+        run: dotnet restore StorageLib.csproj
+
+      - name: Pack
+        run: >
+          dotnet pack StorageLib.csproj
+          --configuration Release
+          --no-restore
+          -p:Version=${{ steps.ver.outputs.version }}
+          --output ${{ github.workspace }}/artifacts
+
+      - name: Push to nuget.org
+        run: >
+          dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"
+          --source https://api.nuget.org/v3/index.json
+          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --skip-duplicate

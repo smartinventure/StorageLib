@@ -1,0 +1,15 @@
+# Normalize all text files to LF in the repository
+* text=auto eol=lf
+
+# Native libraries and other binaries — never modified by git
+*.dll binary
+*.so binary
+*.dylib binary
+*.snk binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.nupkg binary
+*.snupkg binary

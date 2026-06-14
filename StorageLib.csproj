@@ -7,18 +7,24 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     
     <!-- NuGet Package Metadata -->
-    <PackageId>FolderMagic.StorageLib</PackageId>
+    <!-- NuGet package id (globally unique). The assembly name and namespaces remain
+         "StorageLib" so consumers keep using `using StorageLib.Abstractions;` etc. -->
+    <PackageId>SmartInVenture.StorageLib</PackageId>
+    <AssemblyName>StorageLib</AssemblyName>
+    <RootNamespace>StorageLib</RootNamespace>
     <VersionPrefix>1.0</VersionPrefix>
     <VersionSuffix Condition="'$(Configuration)' == 'Debug'">dev</VersionSuffix>
-    <Authors>FolderMagic Team</Authors>
-    <Company>FolderMagic</Company>
-    <Product>FolderMagic Storage Library</Product>
+    <Authors>Smart In Venture GmbH</Authors>
+    <Company>Smart In Venture GmbH</Company>
+    <Product>SmartInVenture Storage Library</Product>
+    <Copyright>Copyright (c) 2025 Smart In Venture GmbH</Copyright>
     <Description>A comprehensive storage abstraction library providing unified interfaces for local, cloud, and virtual storage systems. Includes OpenSlide wrapper for medical imaging support. Supports file operations, caching, throttling, and extensible storage connectors.</Description>
     <PackageTags>storage;abstraction;file-system;cloud-storage;azure;s3;local-storage;virtual-storage;fuse;openslide;medical-imaging</PackageTags>
-    <RepositoryUrl>https://dev.azure.com/yourorg/FolderMagic</RepositoryUrl>
+    <RepositoryUrl>https://github.com/smartinventure/StorageLib</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <PackageProjectUrl>https://dev.azure.com/yourorg/FolderMagic</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/smartinventure/StorageLib</PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <IncludeSymbols>true</IncludeSymbols>
@@ -47,8 +53,9 @@
     <FileVersion>$(VersionPrefix).$(BuildNumber).$(RevisionNumber)</FileVersion>
   </PropertyGroup>
 
-  <!-- Copy NuGet packages to local feed after build for both Debug and Release -->
-  <Target Name="CopyToLocalFeed" AfterTargets="Pack">
+  <!-- Copy NuGet packages to local feed after build (only when the local feed exists,
+       e.g. on the developer machine — skipped on CI where D:\NugetFeed is absent). -->
+  <Target Name="CopyToLocalFeed" AfterTargets="Pack" Condition="Exists('D:\NugetFeed')">
     <ItemGroup>
       <PackageFiles Include="bin\$(Configuration)\*.nupkg" />
       <PackageFiles Include="bin\$(Configuration)\*.snupkg" />
