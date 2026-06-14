@@ -55,21 +55,27 @@ jobs:
           user: smartinventure   # nuget.org package owner
 
       - name: Restore
-        run: dotnet restore StorageLib/StorageLib.csproj
+        run: dotnet restore StorageLib.sln
 
       - name: Build
         run: >
-          dotnet build StorageLib/StorageLib.csproj
+          dotnet build StorageLib.sln
           --configuration Release
           --no-restore
           -p:GeneratePackageOnBuild=false
           -p:Version=${{ steps.ver.outputs.version }}
 
-      - name: Pack
+      - name: Pack core
         run: >
           dotnet pack StorageLib/StorageLib.csproj
-          --configuration Release
-          --no-build
+          --configuration Release --no-build
+          -p:Version=${{ steps.ver.outputs.version }}
+          --output ${{ github.workspace }}/artifacts
+
+      - name: Pack OpenSlide
+        run: >
+          dotnet pack StorageLib.OpenSlide/StorageLib.OpenSlide.csproj
+          --configuration Release --no-build
           -p:Version=${{ steps.ver.outputs.version }}
           --output ${{ github.workspace }}/artifacts
 
