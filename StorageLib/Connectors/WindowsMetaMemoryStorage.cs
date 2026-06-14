@@ -283,14 +283,14 @@ LocalizedResourceName={_driveLabel}
         /// <summary>
         /// Override to ensure this storage remains read-only after initialization.
         /// </summary>
-        public override async Task WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        public override async Task<int> WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
             if (_isReadOnly)
             {
                 throw new InvalidOperationException("WindowsMetaMemoryStorage is read-only. System files cannot be modified.");
             }
-            
-            await base.WriteAsync(path, fileHandle, offset, size, buffer, cancellationToken);
+
+            return await base.WriteAsync(path, fileHandle, offset, size, buffer, cancellationToken);
         }
 
         /// <summary>

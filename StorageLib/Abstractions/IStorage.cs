@@ -36,14 +36,17 @@ namespace StorageLib.Abstractions
         Task CloseAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Read data from a file asynchronously
+        /// Read data from a file asynchronously.
+        /// Returns the number of bytes actually read (which may be less than <paramref name="size"/>
+        /// at end-of-file). Callers MUST honor this count and not assume the full requested size.
         /// </summary>
-        Task ReadAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default);
+        Task<int> ReadAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Write data to a file asynchronously
+        /// Write data to a file asynchronously.
+        /// Returns the number of bytes actually written.
         /// </summary>
-        Task WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default);
+        Task<int> WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default);
 
         
         /// <summary>

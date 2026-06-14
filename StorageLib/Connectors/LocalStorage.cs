@@ -217,13 +217,15 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Read data from a file asynchronously
         /// </summary>
-        public virtual async Task ReadAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        public virtual async Task<int> ReadAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
             {
                 ThrowIfDisposed();
                 if (buffer == IntPtr.Zero)
                     throw new ArgumentException("Buffer cannot be null", nameof(buffer));
                 if (size < 0)
                     throw new ArgumentException("Size cannot be negative", nameof(size));
+
+                int bytesRead = 0;
 
             // Get handle with minimal locking
                     if (!_handleMap.TryGetValue(fileHandle, out var handle))
@@ -242,9 +244,9 @@ namespace StorageLib.Connectors
                     rentedArray = ArrayPool<byte>.Shared.Rent((int)size);
                     
                     // TRUE ASYNC: Use Stream.ReadAsync instead of Stream.Read
-                    int bytesRead = await handle.Stream.ReadAsync(rentedArray, 0, (int)size, cancellationToken)
+                    bytesRead = await handle.Stream.ReadAsync(rentedArray, 0, (int)size, cancellationToken)
                         .ConfigureAwait(false);
-                        
+
                         if (bytesRead > 0)
                         {
                         // PERFORMANCE: Direct marshal copy from pooled array
@@ -268,12 +270,14 @@ namespace StorageLib.Connectors
                         _logger?.LogError(ex, "Error reading from file {Path}", handle.Path);
                         throw;
                     }
+
+            return bytesRead;
         }
 
         /// <summary>
         /// Write data to a file asynchronously
         /// </summary>
-        public virtual async Task WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        public virtual async Task<int> WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
             {
                 ThrowIfDisposed();
                 if (buffer == IntPtr.Zero)
@@ -328,8 +332,10 @@ namespace StorageLib.Connectors
                         _logger?.LogError(ex, "Error writing to file {Path}", handle.Path);
                         throw;
                     }
+
+            return (int)size;
                 }
-        
+
 
         /// <summary>
         /// Flush file buffers to disk asynchronously

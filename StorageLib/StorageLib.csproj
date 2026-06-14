@@ -12,7 +12,8 @@
     <PackageId>SmartInVenture.StorageLib</PackageId>
     <AssemblyName>StorageLib</AssemblyName>
     <RootNamespace>StorageLib</RootNamespace>
-    <VersionPrefix>1.0</VersionPrefix>
+    <!-- 2.0: BREAKING — IStorage.ReadAsync/WriteAsync now return Task<int> (bytes transferred). -->
+    <VersionPrefix>2.0</VersionPrefix>
     <VersionSuffix Condition="'$(Configuration)' == 'Debug'">dev</VersionSuffix>
     <Authors>Smart In Venture GmbH</Authors>
     <Company>Smart In Venture GmbH</Company>
