@@ -57,11 +57,19 @@ jobs:
       - name: Restore
         run: dotnet restore StorageLib/StorageLib.csproj
 
+      - name: Build
+        run: >
+          dotnet build StorageLib/StorageLib.csproj
+          --configuration Release
+          --no-restore
+          -p:GeneratePackageOnBuild=false
+          -p:Version=${{ steps.ver.outputs.version }}
+
       - name: Pack
         run: >
           dotnet pack StorageLib/StorageLib.csproj
           --configuration Release
-          --no-restore
+          --no-build
           -p:Version=${{ steps.ver.outputs.version }}
           --output ${{ github.workspace }}/artifacts
 
