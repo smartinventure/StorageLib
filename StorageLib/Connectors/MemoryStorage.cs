@@ -19,6 +19,7 @@ namespace StorageLib.Connectors
         private readonly object _handleLock = new object();
         private Dictionary<IntPtr, FileHandle> _handleMap = new Dictionary<IntPtr, FileHandle>();
         private readonly ILogger<MemoryStorage>? _logger;
+        private bool _isDisposed;
 
         public EnumStorageType StorageType => EnumStorageType.Memory;
 
@@ -1121,7 +1122,9 @@ namespace StorageLib.Connectors
         /// </summary>
         protected virtual void Dispose(bool disposing)
         {
-            if (disposing)
+            // Idempotent: a connector can be wrapped by multiple pipes/splitters, each of which
+            // disposes its underlying storage — the same instance may be disposed more than once.
+            if (disposing && !_isDisposed)
             {
                 lock (_handleLock)
                 {
@@ -1133,7 +1136,8 @@ namespace StorageLib.Connectors
                 }
                 _memoryFiles.Clear();
                 _directoryContents.Clear();
-                
+
+                _isDisposed = true;
                 _logger?.LogDebug("MemoryStorage disposed");
             }
         }
