@@ -11,7 +11,7 @@
     <AssemblyName>StorageLib.OpenSlide</AssemblyName>
     <RootNamespace>StorageLib.OpenSlide</RootNamespace>
     <!-- Tracks the StorageLib suite version so it depends on the matching core. -->
-    <VersionPrefix>2.1</VersionPrefix>
+    <VersionPrefix>2.2</VersionPrefix>
     <VersionSuffix Condition="'$(Configuration)' == 'Debug'">dev</VersionSuffix>
     <Authors>Smart In Venture GmbH</Authors>
     <Company>Smart In Venture GmbH</Company>

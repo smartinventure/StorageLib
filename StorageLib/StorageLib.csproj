@@ -13,7 +13,7 @@
     <AssemblyName>StorageLib</AssemblyName>
     <RootNamespace>StorageLib</RootNamespace>
     <!-- 2.0: BREAKING — IStorage.ReadAsync/WriteAsync now return Task<int> (bytes transferred). -->
-    <VersionPrefix>2.1</VersionPrefix>
+    <VersionPrefix>2.2</VersionPrefix>
     <VersionSuffix Condition="'$(Configuration)' == 'Debug'">dev</VersionSuffix>
     <Authors>Smart In Venture GmbH</Authors>
     <Company>Smart In Venture GmbH</Company>
@@ -40,7 +40,7 @@
     <RevisionNumber>$([System.DateTime]::Now.ToString('HHmm'))</RevisionNumber>
     <Version>$(VersionPrefix).$(BuildNumber).$(RevisionNumber)</Version>
     <AssemblyVersion>$(VersionPrefix).0.0</AssemblyVersion>
-    <FileVersion>$(VersionPrefix).$(BuildNumber).$(RevisionNumber)</FileVersion>
+    <FileVersion>$(VersionPrefix).0.0</FileVersion>
   </PropertyGroup>
   
   <!-- Debug version with dev suffix -->
@@ -51,7 +51,7 @@
     <RevisionNumber>$([System.DateTime]::Now.ToString('HHmm'))</RevisionNumber>
     <Version>$(VersionPrefix).$(BuildNumber).$(RevisionNumber)-$(VersionSuffix)</Version>
     <AssemblyVersion>$(VersionPrefix).0.0</AssemblyVersion>
-    <FileVersion>$(VersionPrefix).$(BuildNumber).$(RevisionNumber)</FileVersion>
+    <FileVersion>$(VersionPrefix).0.0</FileVersion>
   </PropertyGroup>
 
   <!-- Copy NuGet packages to local feed after build (only when the local feed exists,
@@ -68,6 +68,10 @@
   <!-- Package Release Notes -->
   <PropertyGroup>
     <PackageReleaseNotes>
+2.2.0:
+- Added production SSH/SFTP and supervised rclone connectors.
+- Added EnumStorageType.Rclone and StorageFactory support.
+
 2.1.0:
 - OpenSlide moved to a separate package: SmartInVenture.StorageLib.OpenSlide
   (keeps this core package lean; the 11 MB of native imaging libs ship only with

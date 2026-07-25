@@ -54,6 +54,11 @@ namespace StorageLib.Abstractions
         /// Windows metadata memory storage (autorun.inf, desktop.ini)
         /// Provides Windows-specific system files for drive customization
         /// </summary>
-        WindowsMetaMemory = 9
+        WindowsMetaMemory = 9,
+
+        /// <summary>
+        /// Rclone-backed remote storage exposed through a private SFTP server
+        /// </summary>
+        Rclone = 10
     }
 } 

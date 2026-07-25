@@ -19,6 +19,8 @@ public class EnumStorageTypeTests
         Assert.AreEqual(6, (int)EnumStorageType.FTP);
         Assert.AreEqual(7, (int)EnumStorageType.SSH);
         Assert.AreEqual(8, (int)EnumStorageType.OpenSlide);
+        Assert.AreEqual(9, (int)EnumStorageType.WindowsMetaMemory);
+        Assert.AreEqual(10, (int)EnumStorageType.Rclone);
     }
 
     [TestMethod]
@@ -30,6 +32,7 @@ public class EnumStorageTypeTests
         Assert.AreEqual("AWS", EnumStorageType.AWS.ToString());
         Assert.AreEqual("Azure", EnumStorageType.Azure.ToString());
         Assert.AreEqual("SSH", EnumStorageType.SSH.ToString());
+        Assert.AreEqual("Rclone", EnumStorageType.Rclone.ToString());
     }
 
     [TestMethod]
@@ -44,5 +47,8 @@ public class EnumStorageTypeTests
         
         Assert.IsTrue(Enum.TryParse<EnumStorageType>("SSH", out var sshType));
         Assert.AreEqual(EnumStorageType.SSH, sshType);
+
+        Assert.IsTrue(Enum.TryParse<EnumStorageType>("Rclone", out var rcloneType));
+        Assert.AreEqual(EnumStorageType.Rclone, rcloneType);
     }
 } 

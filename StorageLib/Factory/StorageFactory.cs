@@ -18,10 +18,12 @@ namespace StorageLib.Factory
                     return new MemoryStorage();
                 case EnumStorageType.WindowsMetaMemory:
                     return new WindowsMetaMemoryStorage();
+                case EnumStorageType.SSH:
+                    return new SshStorage();
+                case EnumStorageType.Rclone:
+                    return new RcloneStorage();
                 //case EnumStorageType.AzureBlob:
                 //return new AzureBlobStorage();
-                //case EnumStorageType.SSH:
-                //return new SshStorage();
                 default:
                     throw new ArgumentOutOfRangeException();
             }
