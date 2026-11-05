@@ -289,6 +289,104 @@ namespace StorageLib.Tests.Connectors
         }
 
         [TestMethod]
+        [DataRow(OpenFlags.ReadOnly)]
+        [DataRow(OpenFlags.ReadWrite)]
+        public async Task ReadAsync_ManyReadsOnOneHandleAtOnce_EachGetsItsOwnPart(OpenFlags flags)
+        {
+            const int PartBytes = 4096;
+            const int PartCount = 64;
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            string filePath = "/parts.bin";
+            byte[] content = new byte[PartBytes * PartCount];
+            for (int index = 0; index < content.Length; index++)
+            {
+                content[index] = (byte)(index / PartBytes);
+            }
+            File.WriteAllBytes(Path.Combine(_testBaseDir, "parts.bin"), content);
+            IntPtr handle = await _storage.OpenAsync(filePath, flags);
+
+            var reads = Enumerable.Range(0, PartCount).Select(part => Task.Run(async () =>
+            {
+                IntPtr buffer = Marshal.AllocHGlobal(PartBytes);
+                try
+                {
+                    int read = await _storage.ReadAsync(filePath, handle, (long)part * PartBytes, PartBytes, buffer);
+                    byte[] bytes = new byte[read];
+                    Marshal.Copy(buffer, bytes, 0, read);
+                    return (Part: part, Bytes: bytes);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }));
+            var results = await Task.WhenAll(reads);
+            await _storage.CloseAsync(filePath, handle);
+
+            foreach (var (part, bytes) in results)
+            {
+                Assert.AreEqual(PartBytes, bytes.Length, $"part {part}");
+                Assert.IsTrue(bytes.All(value => value == (byte)part), $"part {part} came back with another part's data");
+            }
+        }
+
+        [TestMethod]
+        public async Task WriteAsync_ManyWritesOnOneHandleAtOnce_EachLandsAtItsOffset()
+        {
+            const int PartBytes = 4096;
+            const int PartCount = 64;
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            string filePath = "/written_parts.bin";
+            IntPtr handle = await _storage.OpenAsync(filePath, OpenFlags.Create | OpenFlags.WriteOnly);
+
+            await Task.WhenAll(Enumerable.Range(0, PartCount).Select(part => Task.Run(async () =>
+            {
+                byte[] bytes = Enumerable.Repeat((byte)part, PartBytes).ToArray();
+                IntPtr buffer = Marshal.AllocHGlobal(PartBytes);
+                try
+                {
+                    Marshal.Copy(bytes, 0, buffer, PartBytes);
+                    await _storage.WriteAsync(filePath, handle, (long)part * PartBytes, PartBytes, buffer);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            })));
+            await _storage.CloseAsync(filePath, handle);
+
+            byte[] content = File.ReadAllBytes(Path.Combine(_testBaseDir, "written_parts.bin"));
+            Assert.AreEqual(PartBytes * PartCount, content.Length);
+            for (int index = 0; index < content.Length; index++)
+            {
+                Assert.AreEqual((byte)(index / PartBytes), content[index], $"byte {index}");
+            }
+        }
+
+        [TestMethod]
+        public async Task OpenAsync_ReadOnlyDirectory_ThrowsUnauthorizedAccessException()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            await _storage.CreateDirectoryAsync("/not_a_file");
+
+            await Assert.ThrowsExactlyAsync<UnauthorizedAccessException>(() => _storage.OpenAsync("/not_a_file", OpenFlags.ReadOnly));
+        }
+
+        [TestMethod]
+        public async Task DeleteAsync_FileOpenedReadOnly_DeletesItAndTheHandleStillCloses()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            string filePath = "/deleted_while_open.txt";
+            File.WriteAllText(Path.Combine(_testBaseDir, "deleted_while_open.txt"), "gone");
+            IntPtr handle = await _storage.OpenAsync(filePath, OpenFlags.ReadOnly);
+
+            await _storage.DeleteAsync(filePath);
+            await _storage.CloseAsync(filePath, handle);
+
+            Assert.IsFalse(await _storage.FileExistsAsync(filePath));
+        }
+
+        [TestMethod]
         public async Task TestReadAsync_ReturnsTrue()
         {
             // Arrange

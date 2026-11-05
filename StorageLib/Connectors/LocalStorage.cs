@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
 using StorageLib.Abstractions;
 using StorageLib.Utilities;
 using System.Buffers;
@@ -11,7 +12,6 @@ namespace StorageLib.Connectors
     /// </summary>
     public class LocalStorage : IStorage, IDisposable
     {
-        private const int DefaultFileBufferBytes = 4096;
         private const int UnbufferedFileBufferBytes = 0;
 
         private string _baseFolder = string.Empty;
@@ -162,11 +162,11 @@ namespace StorageLib.Connectors
                         }
                     }
 
-                    // Write handles skip .NET's buffer (Windows still caches): with it, a full disk only
-                    // shows when the buffer is written at close, too late for the caller to do anything
-                    // about it, and the buffered bytes are lost.
-                    int bufferSize = access == FileAccess.Read ? DefaultFileBufferBytes : UnbufferedFileBufferBytes;
-                    var stream = new FileStream(realPath, mode, access, share, bufferSize);
+                    // No handle has .NET's buffer (Windows still caches): reads and writes go to explicit
+                    // offsets past it, and with it a full disk would only show when the buffer is written at
+                    // close, too late for the caller to do anything about it, and the buffered bytes are lost.
+                    var stream = new FileStream(realPath, mode, access, share, UnbufferedFileBufferBytes);
+
                     bool isAppendMode = flags.HasFlag(OpenFlags.Append);
                     var handle = new FileHandle(realPath, stream, access == FileAccess.Read, this, isAppendMode);
 
@@ -240,13 +240,10 @@ namespace StorageLib.Connectors
 
                     try
                     {
-                // Seek to the specified offset (inherently synchronous, that's OK)
-                        handle.Stream.Seek(offset, SeekOrigin.Begin);
-
                 // Straight into the caller's buffer: a 4 MB read is one copy less, and the buffer's pages are
                 // touched by the read itself instead of by a second copy afterwards.
                 using var target = new NativeBufferMemoryManager(buffer, (int)size);
-                bytesRead = await handle.Stream.ReadAsync(target.Memory, cancellationToken).ConfigureAwait(false);
+                bytesRead = await RandomAccess.ReadAsync(OperatingSystemHandle(handle.Stream), target.Memory, offset, cancellationToken).ConfigureAwait(false);
 
 #if DEBUG
                         _logger?.LogTrace("Read {BytesRead} bytes from {Path} at offset {Offset}", 
@@ -282,11 +279,17 @@ namespace StorageLib.Connectors
 
                     try
                     {
-                // Seek to the specified offset (inherently synchronous, that's OK)
-                        handle.Stream.Seek(offset, SeekOrigin.Begin);
-                
                 using var source = new NativeBufferMemoryManager(buffer, (int)size);
-                await handle.Stream.WriteAsync(source.Memory, cancellationToken).ConfigureAwait(false);
+                if (handle.IsAppendMode)
+                {
+                    // Append mode keeps the stream's own rule that nothing before the old end is overwritten.
+                    handle.Stream.Seek(offset, SeekOrigin.Begin);
+                    await handle.Stream.WriteAsync(source.Memory, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await RandomAccess.WriteAsync(OperatingSystemHandle(handle.Stream), source.Memory, offset, cancellationToken).ConfigureAwait(false);
+                }
 
 #if DEBUG
                         _logger?.LogTrace("Wrote {Size} bytes to {Path} at offset {Offset}", 
@@ -998,6 +1001,16 @@ namespace StorageLib.Connectors
                 }
             }, cancellationToken).ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// The operating system's handle behind a stream this storage opened. Reads and writes go to an
+        /// explicit offset through it rather than moving the stream's position first: FolderMagic shares one
+        /// handle per file among all of Windows' opens of it, so two requests at once would move each
+        /// other's position.
+        /// </summary>
+        private static SafeFileHandle OperatingSystemHandle(Stream stream) => stream is FileStream fileStream
+            ? fileStream.SafeFileHandle
+            : throw new InvalidOperationException($"A {stream.GetType().Name} has no operating system handle.");
 
         /// <summary>
         /// The stream of a handle this storage has open for writing on <paramref name="realPath"/>, or null.
