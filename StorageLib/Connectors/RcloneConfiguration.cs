@@ -6,6 +6,7 @@ internal static class RcloneConfiguration
 {
     private const int MinimumStartupTimeoutSeconds = 1;
     private const int MaximumStartupTimeoutSeconds = 300;
+    private const int MaximumUploadDrainSeconds = 600;
 
     public static RcloneConnectionOptions Parse(string connectionString)
     {
@@ -37,6 +38,20 @@ internal static class RcloneConfiguration
             throw new ArgumentOutOfRangeException(
                 nameof(options.StartupTimeoutSeconds),
                 $"Startup timeout must be between {MinimumStartupTimeoutSeconds} and {MaximumStartupTimeoutSeconds} seconds.");
+        }
+
+        if (options.CacheFolder.Length > 0 && !Path.IsPathFullyQualified(options.CacheFolder))
+        {
+            throw new ArgumentException(
+                "An absolute folder path is required.",
+                nameof(options.CacheFolder));
+        }
+
+        if (options.UploadDrainTimeoutSeconds is < 0 or > MaximumUploadDrainSeconds)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options.UploadDrainTimeoutSeconds),
+                $"The upload drain timeout must be between 0 and {MaximumUploadDrainSeconds} seconds.");
         }
     }
 

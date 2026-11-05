@@ -475,6 +475,56 @@ namespace StorageLib.Tests.Connectors
         }
 
         [TestMethod]
+        public async Task SetTimesAsync_FileOpenWithUnwrittenData_TimesSurviveTheClose()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            string filePath = "/open_time_test.txt";
+            byte[] data = Encoding.UTF8.GetBytes("written before the times are set");
+            DateTime newAccessTime = new DateTime(2023, 1, 1, 12, 0, 0);
+            DateTime newModifiedTime = new DateTime(2023, 1, 2, 12, 0, 0);
+
+            IntPtr handle = await _storage.OpenAsync(filePath, OpenFlags.Create | OpenFlags.ReadWrite);
+            IntPtr buffer = Marshal.AllocHGlobal(data.Length);
+            try
+            {
+                Marshal.Copy(data, 0, buffer, data.Length);
+                await _storage.WriteAsync(filePath, handle, 0, data.Length, buffer);
+                await _storage.SetTimesAsync(filePath, newAccessTime, newModifiedTime);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+            await _storage.CloseAsync(filePath, handle);
+
+            var fileInfo = await _storage.GetFileInfoAsync(filePath);
+            Assert.AreEqual(newModifiedTime, fileInfo.LastModified);
+            Assert.AreEqual(newAccessTime, fileInfo.LastAccessTime);
+            Assert.AreEqual(data.Length, fileInfo.Size);
+        }
+
+        [TestMethod]
+        public async Task GetFileInfoAsync_Directory_ReturnsDirectory()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            await _storage.CreateDirectoryAsync("/info_dir");
+
+            var fileInfo = await _storage.GetFileInfoAsync("/info_dir");
+
+            Assert.IsTrue(fileInfo.IsDirectory);
+            Assert.AreEqual("info_dir", fileInfo.Filename);
+            Assert.AreEqual(0, fileInfo.Size);
+        }
+
+        [TestMethod]
+        public async Task GetFileInfoAsync_MissingPath_ThrowsFileNotFoundException()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+
+            await Assert.ThrowsExactlyAsync<FileNotFoundException>(() => _storage.GetFileInfoAsync("/missing.txt"));
+        }
+
+        [TestMethod]
         public async Task EnumerateFilesAndDirectoriesAsync_ReturnsCorrectEntries()
         {
             // Arrange

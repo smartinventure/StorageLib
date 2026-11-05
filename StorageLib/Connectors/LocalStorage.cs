@@ -11,6 +11,9 @@ namespace StorageLib.Connectors
     /// </summary>
     public class LocalStorage : IStorage, IDisposable
     {
+        private const int DefaultFileBufferBytes = 4096;
+        private const int UnbufferedFileBufferBytes = 0;
+
         private string _baseFolder = string.Empty;
         private readonly object _handleLock = new object();
         private readonly Dictionary<IntPtr, FileHandle> _handleMap = new Dictionary<IntPtr, FileHandle>();
@@ -159,7 +162,11 @@ namespace StorageLib.Connectors
                         }
                     }
 
-                    var stream = new FileStream(realPath, mode, access, share);
+                    // Write handles skip .NET's buffer (Windows still caches): with it, a full disk only
+                    // shows when the buffer is written at close, too late for the caller to do anything
+                    // about it, and the buffered bytes are lost.
+                    int bufferSize = access == FileAccess.Read ? DefaultFileBufferBytes : UnbufferedFileBufferBytes;
+                    var stream = new FileStream(realPath, mode, access, share, bufferSize);
                     bool isAppendMode = flags.HasFlag(OpenFlags.Append);
                     var handle = new FileHandle(realPath, stream, access == FileAccess.Read, this, isAppendMode);
 
@@ -235,35 +242,16 @@ namespace StorageLib.Connectors
                     {
                 // Seek to the specified offset (inherently synchronous, that's OK)
                         handle.Stream.Seek(offset, SeekOrigin.Begin);
-                
-                // MARSHAL OPTIMIZATION: Use ArrayPool to reduce allocations
-                byte[]? rentedArray = null;
-                try
-                {
-                    // Rent from pool instead of allocating new array every time
-                    rentedArray = ArrayPool<byte>.Shared.Rent((int)size);
-                    
-                    // TRUE ASYNC: Use Stream.ReadAsync instead of Stream.Read
-                    bytesRead = await handle.Stream.ReadAsync(rentedArray, 0, (int)size, cancellationToken)
-                        .ConfigureAwait(false);
 
-                        if (bytesRead > 0)
-                        {
-                        // PERFORMANCE: Direct marshal copy from pooled array
-                        Marshal.Copy(rentedArray, 0, buffer, bytesRead);
-                        }
-                        
+                // Straight into the caller's buffer: a 4 MB read is one copy less, and the buffer's pages are
+                // touched by the read itself instead of by a second copy afterwards.
+                using var target = new NativeBufferMemoryManager(buffer, (int)size);
+                bytesRead = await handle.Stream.ReadAsync(target.Memory, cancellationToken).ConfigureAwait(false);
+
 #if DEBUG
                         _logger?.LogTrace("Read {BytesRead} bytes from {Path} at offset {Offset}", 
                             bytesRead, handle.Path, offset);
 #endif
-                }
-                finally
-                {
-                    // Always return rented array to pool
-                    if (rentedArray != null)
-                        ArrayPool<byte>.Shared.Return(rentedArray);
-                }
                     }
                     catch (Exception ex)
                     {
@@ -297,35 +285,13 @@ namespace StorageLib.Connectors
                 // Seek to the specified offset (inherently synchronous, that's OK)
                         handle.Stream.Seek(offset, SeekOrigin.Begin);
                 
-                // MARSHAL OPTIMIZATION: Use ArrayPool to reduce allocations
-                byte[]? rentedArray = null;
-                try
-                {
-                    // Rent from pool instead of allocating new array every time
-                    rentedArray = ArrayPool<byte>.Shared.Rent((int)size);
-                    
-                    // PERFORMANCE: Direct marshal copy to pooled array
-                    Marshal.Copy(buffer, rentedArray, 0, (int)size);
-                    
-                    // TRUE ASYNC: Use Stream.WriteAsync instead of Stream.Write
-                    await handle.Stream.WriteAsync(rentedArray, 0, (int)size, cancellationToken)
-                        .ConfigureAwait(false);
-                    
-                    // PERFORMANCE OPTIMIZATION: Remove automatic flush - only flush on close or when explicitly requested
-                    // This eliminates the major performance bottleneck for chunked writes
-                    // handle.Stream.Flush(); // ❌ Removed automatic flush
-                        
+                using var source = new NativeBufferMemoryManager(buffer, (int)size);
+                await handle.Stream.WriteAsync(source.Memory, cancellationToken).ConfigureAwait(false);
+
 #if DEBUG
                         _logger?.LogTrace("Wrote {Size} bytes to {Path} at offset {Offset}", 
                             size, handle.Path, offset);
 #endif
-                }
-                finally
-                {
-                    // Always return rented array to pool
-                    if (rentedArray != null)
-                        ArrayPool<byte>.Shared.Return(rentedArray);
-                }
                     }
                     catch (Exception ex)
                     {
@@ -601,9 +567,9 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Check if a file exists asynchronously
         /// </summary>
-        public virtual async Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default)
+        public virtual Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default)
         {
-            return await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 if (string.IsNullOrEmpty(filePath))
@@ -628,9 +594,9 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Check if a directory exists asynchronously
         /// </summary>
-        public virtual async Task<bool> DirectoryExistsAsync(string directoryPath, CancellationToken cancellationToken = default)
+        public virtual Task<bool> DirectoryExistsAsync(string directoryPath, CancellationToken cancellationToken = default)
         {
-            return await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 if (string.IsNullOrEmpty(directoryPath))
@@ -686,9 +652,9 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Get file information asynchronously
         /// </summary>
-        public virtual async Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
+        public virtual Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
         {
-            return await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 if (string.IsNullOrEmpty(filePath))
@@ -698,17 +664,19 @@ namespace StorageLib.Connectors
                 
                 try
                 {
-                    bool isDirectory = Directory.Exists(realPath);
-                    bool isFile = File.Exists(realPath);
+                    // One query answers both "does it exist" and all its attributes; FileInfo keeps what it read.
+                    var fileInfo = new FileInfo(realPath);
+                    bool isFile = fileInfo.Exists;
+                    var dirInfo = isFile ? null : new DirectoryInfo(realPath);
 
-                    if (!isDirectory && !isFile)
+                    if (!isFile && !dirInfo!.Exists)
                     {
                         throw new FileNotFoundException("The specified path does not exist.", realPath);
                     }
 
                     var fileObject = new FileObject(filePath)
                     {
-                        IsDirectory = isDirectory,
+                        IsDirectory = !isFile,
                         RealPath = filePath,
                         VirtualPath = filePath,
                         SC = this
@@ -716,7 +684,6 @@ namespace StorageLib.Connectors
 
                     if (isFile)
                     {
-                        var fileInfo = new FileInfo(realPath);
                         fileObject.Size = fileInfo.Length;
                         fileObject.CreationTime = fileInfo.CreationTime;
                         fileObject.LastModified = fileInfo.LastWriteTime;
@@ -725,8 +692,7 @@ namespace StorageLib.Connectors
                     }
                     else
                     {
-                        var dirInfo = new DirectoryInfo(realPath);
-                        fileObject.CreationTime = dirInfo.CreationTime;
+                        fileObject.CreationTime = dirInfo!.CreationTime;
                         fileObject.LastModified = dirInfo.LastWriteTime;
                         fileObject.LastAccessTime = dirInfo.LastAccessTime;
                         fileObject.Filename = dirInfo.Name;
@@ -1004,6 +970,17 @@ namespace StorageLib.Connectors
         /// </summary>
         public virtual async Task SetTimesAsync(string path, DateTime accessTime, DateTime modifiedTime, CancellationToken cancellationToken = default)
         {
+            ThrowIfDisposed();
+            if (FindOpenWriteStream(GetRealPath(path)) is { } openStream)
+            {
+                // By path, each time would open the file once more, and data still buffered in the open stream
+                // would be written afterwards and move the modification time forward again.
+                await openStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                File.SetLastAccessTime(openStream.SafeFileHandle, accessTime);
+                File.SetLastWriteTime(openStream.SafeFileHandle, modifiedTime);
+                return;
+            }
+
             await Task.Run(() =>
             {
                 ThrowIfDisposed();
@@ -1022,6 +999,47 @@ namespace StorageLib.Connectors
                     throw;
                 }
             }, cancellationToken);
+        }
+
+        /// <summary>
+        /// The stream of a handle this storage has open for writing on <paramref name="realPath"/>, or null.
+        /// </summary>
+        private FileStream? FindOpenWriteStream(string realPath)
+        {
+            lock (_handleLock)
+            {
+                foreach (var handle in _handleMap.Values)
+                {
+                    if (!handle.IsReadOnly && handle.Stream is FileStream stream &&
+                        string.Equals(handle.Path, realPath, System.OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                    {
+                        return stream;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Runs a quick metadata query on the calling thread. Handing it to the thread pool cost more than
+        /// the query itself, and the callers wait for the answer anyway.
+        /// </summary>
+        private static Task<T> RunInline<T>(Func<T> query, CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<T>(cancellationToken);
+            }
+
+            try
+            {
+                return Task.FromResult(query());
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException<T>(ex);
+            }
         }
 
         /// <summary>

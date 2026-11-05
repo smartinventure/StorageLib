@@ -1,7 +1,4 @@
 using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
-using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using StorageLib.Abstractions;
 
@@ -10,12 +7,18 @@ namespace StorageLib.Connectors;
 /// <summary>
 /// Runs an isolated loopback-only rclone SFTP server and delegates storage operations to SSH.NET.
 /// </summary>
-public sealed class RcloneStorage : IStorage
+public sealed class RcloneStorage : IStorage, IPendingUploadSource
 {
+    private const int DrainPollMilliseconds = 250;
+    private const int DrainUnreachableAttempts = 3;
+
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
     private readonly ILogger<RcloneStorage>? _logger;
     private Process? _process;
     private SshStorage? _storage;
+    private RcloneRemoteControl? _remoteControl;
+    private string _servedTarget = string.Empty;
+    private int _uploadDrainTimeoutSeconds;
     private Task? _standardOutputDrain;
     private Task? _standardErrorDrain;
     private string? _ownedConfigPath;
@@ -79,10 +82,13 @@ public sealed class RcloneStorage : IStorage
 
                 RcloneConfiguration.Validate(options);
                 string target = BuildTarget(options.RemoteName, baseFolderOrContainer);
-                int port = ReserveLoopbackPort();
-                string username = CreateCredential();
-                string password = CreateCredential();
-                process = CreateProcess(options, target, port, username, password);
+                var sftp = RcloneEndpoint.CreateOnFreePort();
+                // The control interface is only worth having where rclone holds files back: it is how the
+                // shutdown finds out whether anything is still waiting to go up.
+                RcloneEndpoint? remoteControl = !options.IsReadOnly && options.UseWriteCache
+                    ? RcloneEndpoint.CreateOnFreePort()
+                    : null;
+                process = CreateProcess(new RcloneProcessRequest(options, target, sftp, remoteControl));
                 if (!process.Start())
                 {
                     throw new InvalidOperationException("The rclone process could not be started.");
@@ -90,19 +96,22 @@ public sealed class RcloneStorage : IStorage
 
                 process.StartInfo.ArgumentList.Clear();
                 _process = process;
+                _uploadDrainTimeoutSeconds = options.UploadDrainTimeoutSeconds;
+                _remoteControl = remoteControl is null
+                    ? null
+                    : new RcloneRemoteControl(remoteControl.Port, remoteControl.Username, remoteControl.Password);
                 _standardOutputDrain = DrainAsync(process.StandardOutput);
                 _standardErrorDrain = DrainAsync(process.StandardError);
                 _storage = await WaitForSftpAsync(
                     process,
-                    port,
-                    username,
-                    password,
+                    sftp,
                     TimeSpan.FromSeconds(options.StartupTimeoutSeconds),
                     cancellationToken).ConfigureAwait(false);
                 _storage.MaxReadBytesPerSecond = _maxReadBytesPerSecond;
                 _storage.MaxWriteBytesPerSecond = _maxWriteBytesPerSecond;
                 ConnectionString = connectionString;
                 BaseFolderOrContainer = RcloneConfiguration.NormalizeSubpath(baseFolderOrContainer);
+                _servedTarget = target;
                 _logger?.LogInformation(
                     "Rclone SFTP connector started for remote {RemoteName} on loopback",
                     options.RemoteName);
@@ -261,13 +270,9 @@ public sealed class RcloneStorage : IStorage
         }
     }
 
-    private static Process CreateProcess(
-        RcloneConnectionOptions options,
-        string target,
-        int port,
-        string username,
-        string password)
+    internal static Process CreateProcess(RcloneProcessRequest request)
     {
+        RcloneConnectionOptions options = request.Options;
         var startInfo = new ProcessStartInfo
         {
             FileName = options.ExecutablePath,
@@ -279,18 +284,56 @@ public sealed class RcloneStorage : IStorage
 
         startInfo.ArgumentList.Add("serve");
         startInfo.ArgumentList.Add("sftp");
-        startInfo.ArgumentList.Add(target);
+        startInfo.ArgumentList.Add(request.Target);
         startInfo.ArgumentList.Add("--addr");
-        startInfo.ArgumentList.Add($"127.0.0.1:{port}");
+        startInfo.ArgumentList.Add($"127.0.0.1:{request.Sftp.Port}");
         startInfo.ArgumentList.Add("--user");
-        startInfo.ArgumentList.Add(username);
+        startInfo.ArgumentList.Add(request.Sftp.Username);
         startInfo.ArgumentList.Add("--pass");
-        startInfo.ArgumentList.Add(password);
+        startInfo.ArgumentList.Add(request.Sftp.Password);
         startInfo.ArgumentList.Add("--config");
         startInfo.ArgumentList.Add(options.ConfigPath);
+        if (options.CacheFolder.Length > 0)
+        {
+            startInfo.ArgumentList.Add("--cache-dir");
+            startInfo.ArgumentList.Add(options.CacheFolder);
+        }
+
         if (options.IsReadOnly)
         {
             startInfo.ArgumentList.Add("--read-only");
+        }
+        else if (options.UseWriteCache)
+        {
+            // "writes" buffers the file locally and uploads it on close, so a program may save in any
+            // order and rclone gets to retry a flaky connection. The cost is that a finished save means
+            // "on this computer"; the control interface below is what lets us wait for the rest.
+            startInfo.ArgumentList.Add("--vfs-cache-mode");
+            startInfo.ArgumentList.Add("writes");
+            startInfo.ArgumentList.Add("--vfs-write-back");
+            startInfo.ArgumentList.Add($"{Math.Max(0, options.WriteBackSeconds)}s");
+            startInfo.ArgumentList.Add("--vfs-cache-max-size");
+            startInfo.ArgumentList.Add($"{Math.Max(1, options.WriteCacheSizeMegabytes)}M");
+            startInfo.ArgumentList.Add("--vfs-cache-max-age");
+            startInfo.ArgumentList.Add($"{Math.Max(1, options.WriteCacheMaxAgeHours)}h");
+        }
+        else
+        {
+            // Without a buffer rclone serves in mode "off": every write goes to the remote as it arrives
+            // and closing the file is what commits and verifies it. Nothing can be left behind, but a file
+            // has to be written from start to end and cannot be opened for reading and writing at once.
+            startInfo.ArgumentList.Add("--vfs-cache-mode");
+            startInfo.ArgumentList.Add("off");
+        }
+
+        if (request.RemoteControl is not null)
+        {
+            startInfo.ArgumentList.Add("--rc");
+            startInfo.ArgumentList.Add("--rc-addr");
+            startInfo.ArgumentList.Add($"127.0.0.1:{request.RemoteControl.Port}");
+            // Credentials go through the environment, which other users cannot read, unlike a command line.
+            startInfo.Environment["RCLONE_RC_USER"] = request.RemoteControl.Username;
+            startInfo.Environment["RCLONE_RC_PASS"] = request.RemoteControl.Password;
         }
 
         return new Process { StartInfo = startInfo };
@@ -298,9 +341,7 @@ public sealed class RcloneStorage : IStorage
 
     private static async Task<SshStorage> WaitForSftpAsync(
         Process process,
-        int port,
-        string username,
-        string password,
+        RcloneEndpoint endpoint,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
@@ -309,7 +350,8 @@ public sealed class RcloneStorage : IStorage
             cancellationToken,
             timeoutSource.Token);
         string connectionString =
-            $"sftp://{Uri.EscapeDataString(username)}:{Uri.EscapeDataString(password)}@127.0.0.1:{port}";
+            $"sftp://{Uri.EscapeDataString(endpoint.Username)}:" +
+            $"{Uri.EscapeDataString(endpoint.Password)}@127.0.0.1:{endpoint.Port}";
 
         while (true)
         {
@@ -334,6 +376,25 @@ public sealed class RcloneStorage : IStorage
             }
         }
     }
+
+    /// <summary>
+    /// What rclone still has to upload for this connection. Zero while a read-only connection or one that
+    /// writes straight through is in use, because neither holds anything back.
+    /// </summary>
+    public async Task<PendingUploadState> GetPendingUploadsAsync(CancellationToken cancellationToken = default)
+    {
+        RcloneRemoteControl? remoteControl = _remoteControl;
+        if (remoteControl is null || _process is null or { HasExited: true })
+        {
+            return PendingUploadState.None;
+        }
+
+        return await remoteControl.GetPendingUploadsAsync(cancellationToken).ConfigureAwait(false)
+               ?? PendingUploadState.None;
+    }
+
+    public string PendingUploadSourceName =>
+        _servedTarget.Length == 0 ? "cloud storage" : $"cloud storage {_servedTarget}";
 
     private async Task ShutdownCoreAsync(CancellationToken cancellationToken)
     {
@@ -362,11 +423,17 @@ public sealed class RcloneStorage : IStorage
         }
 
         Process? process = Interlocked.Exchange(ref _process, null);
+        RcloneRemoteControl? remoteControl = Interlocked.Exchange(ref _remoteControl, null);
         bool canDeleteConfig = process is null;
         try
         {
             if (process is not null)
             {
+                if (remoteControl is not null)
+                {
+                    await WaitForPendingUploadsAsync(process, remoteControl).ConfigureAwait(false);
+                }
+
                 if (!process.HasExited)
                 {
                     process.Kill(true);
@@ -380,15 +447,85 @@ public sealed class RcloneStorage : IStorage
         }
         finally
         {
+            remoteControl?.Dispose();
             process?.Dispose();
             _standardOutputDrain = null;
             _standardErrorDrain = null;
+            _servedTarget = string.Empty;
             ConnectionString = string.Empty;
             BaseFolderOrContainer = string.Empty;
             if (canDeleteConfig)
             {
                 DeleteOwnedConfig();
             }
+        }
+    }
+
+    /// <summary>
+    /// Waits for rclone to finish the uploads it is holding before the process is stopped. Killing it
+    /// with files still queued is not data loss — the cache folder is kept and rclone picks them up the
+    /// next time the same remote is mounted — but it does mean a file the user saved is not in the cloud
+    /// yet, so it is worth waiting for and worth a log entry when the wait runs out.
+    /// </summary>
+    private async Task WaitForPendingUploadsAsync(Process process, RcloneRemoteControl remoteControl)
+    {
+        if (_uploadDrainTimeoutSeconds <= 0)
+        {
+            return;
+        }
+
+        DateTime deadline = DateTime.UtcNow.AddSeconds(_uploadDrainTimeoutSeconds);
+        int unreachableAttempts = 0;
+        while (!process.HasExited)
+        {
+            PendingUploadState? pending = await remoteControl
+                .GetPendingUploadsAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+            if (pending is null)
+            {
+                // Asking is the only way to know, so a control interface that does not answer means
+                // waiting would be waiting blind. Give it a few tries, then stop.
+                if (++unreachableAttempts >= DrainUnreachableAttempts)
+                {
+                    _logger?.LogWarning(
+                        "Rclone did not report its upload queue for {RemoteTarget}; stopping without waiting",
+                        _servedTarget);
+                    return;
+                }
+            }
+            else
+            {
+                unreachableAttempts = 0;
+                if (!pending.HasPendingUploads)
+                {
+                    if (pending.FailedFileCount > 0)
+                    {
+                        _logger?.LogWarning(
+                            "Rclone reports {FailedFileCount} file(s) it could not upload to {RemoteTarget}",
+                            pending.FailedFileCount,
+                            _servedTarget);
+                    }
+
+                    return;
+                }
+
+                if (DateTime.UtcNow >= deadline)
+                {
+                    _logger?.LogWarning(
+                        "Stopping rclone for {RemoteTarget} with {FileCount} upload(s) still queued; " +
+                        "they stay in the cache folder and are retried on the next mount",
+                        _servedTarget,
+                        pending.FileCount);
+                    return;
+                }
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return;
+            }
+
+            await Task.Delay(DrainPollMilliseconds, CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -426,23 +563,6 @@ public sealed class RcloneStorage : IStorage
         {
         }
     }
-
-    private static int ReserveLoopbackPort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        try
-        {
-            return ((IPEndPoint)listener.LocalEndpoint).Port;
-        }
-        finally
-        {
-            listener.Stop();
-        }
-    }
-
-    private static string CreateCredential() =>
-        Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 
     private SshStorage GetStorage()
     {

@@ -31,6 +31,159 @@ public class RcloneStorageTests
     }
 
     [TestMethod]
+    public void CreateProcess_Writable_ServesWithAWriteCache()
+    {
+        // Served in rclone's default mode, a file has to be written strictly front to back and cannot be
+        // open for reading and writing at once, which is how a filesystem writes nearly everything.
+        var options = new RcloneConnectionOptions
+        {
+            RemoteName = "remote",
+            ExecutablePath = "rclone",
+            ConfigPath = "config",
+            WriteBackSeconds = 7,
+            WriteCacheSizeMegabytes = 2048,
+            WriteCacheMaxAgeHours = 3
+        };
+
+        using var process = RcloneStorage.CreateProcess(Request(options));
+        var arguments = process.StartInfo.ArgumentList;
+
+        CollectionAssert.IsSubsetOf(
+            new[] { "--vfs-cache-mode", "writes", "--vfs-write-back", "7s", "--vfs-cache-max-size", "2048M", "--vfs-cache-max-age", "3h" },
+            arguments.ToArray());
+    }
+
+    [TestMethod]
+    public void CreateProcess_WritableWithoutAWriteCache_ServesStraightThrough()
+    {
+        // Nothing may be held back here: closing a file has to mean the remote has accepted it.
+        var options = new RcloneConnectionOptions
+        {
+            RemoteName = "remote",
+            ExecutablePath = "rclone",
+            ConfigPath = "config",
+            UseWriteCache = false
+        };
+
+        using var process = RcloneStorage.CreateProcess(Request(options));
+        var arguments = process.StartInfo.ArgumentList;
+
+        CollectionAssert.IsSubsetOf(new[] { "--vfs-cache-mode", "off" }, arguments.ToArray());
+        Assert.IsFalse(arguments.Contains("--vfs-write-back"),
+            "There is no queue to write back from.");
+    }
+
+    [TestMethod]
+    public void CreateProcess_PinnedCacheFolder_IsPassedToRclone()
+    {
+        string cacheFolder = Path.Combine(Path.GetTempPath(), "fm-rclone-cache");
+        var options = new RcloneConnectionOptions
+        {
+            RemoteName = "remote",
+            ExecutablePath = "rclone",
+            ConfigPath = "config",
+            CacheFolder = cacheFolder
+        };
+
+        using var process = RcloneStorage.CreateProcess(Request(options));
+        var arguments = process.StartInfo.ArgumentList;
+
+        CollectionAssert.IsSubsetOf(new[] { "--cache-dir", cacheFolder }, arguments.ToArray());
+    }
+
+    [TestMethod]
+    public void CreateProcess_WithRemoteControl_KeepsCredentialsOutOfTheCommandLine()
+    {
+        var options = new RcloneConnectionOptions
+        {
+            RemoteName = "remote",
+            ExecutablePath = "rclone",
+            ConfigPath = "config"
+        };
+        var remoteControl = new RcloneEndpoint(5722, "rcuser", "rcpassword");
+
+        using var process = RcloneStorage.CreateProcess(
+            new RcloneProcessRequest(options, "remote:", new RcloneEndpoint(2022, "user", "password"), remoteControl));
+        var arguments = process.StartInfo.ArgumentList;
+
+        CollectionAssert.IsSubsetOf(new[] { "--rc", "--rc-addr", "127.0.0.1:5722" }, arguments.ToArray());
+        Assert.IsFalse(arguments.Contains("rcpassword"), "Another user can read a command line.");
+        Assert.AreEqual("rcuser", process.StartInfo.Environment["RCLONE_RC_USER"]);
+        Assert.AreEqual("rcpassword", process.StartInfo.Environment["RCLONE_RC_PASS"]);
+    }
+
+    [TestMethod]
+    public void CreateProcess_WithoutRemoteControl_StartsNoControlInterface()
+    {
+        var options = new RcloneConnectionOptions
+        {
+            RemoteName = "remote",
+            ExecutablePath = "rclone",
+            ConfigPath = "config"
+        };
+
+        using var process = RcloneStorage.CreateProcess(Request(options));
+
+        Assert.IsFalse(process.StartInfo.ArgumentList.Contains("--rc"));
+    }
+
+    [TestMethod]
+    public async Task GetPendingUploadsAsync_NotInitialized_ReportsNothingPending()
+    {
+        using var storage = new RcloneStorage();
+
+        var pending = await storage.GetPendingUploadsAsync();
+
+        Assert.AreEqual(PendingUploadState.None, pending);
+        Assert.IsFalse(pending.HasPendingUploads);
+    }
+
+    [TestMethod]
+    public async Task InitializeAsync_CacheFolderThatIsNotAbsolute_ThrowsArgumentException()
+    {
+        string executablePath = Path.GetTempFileName();
+        string configPath = Path.GetTempFileName();
+        try
+        {
+            var options = new RcloneConnectionOptions
+            {
+                RemoteName = "remote",
+                ExecutablePath = executablePath,
+                ConfigPath = configPath,
+                CacheFolder = "relative\\cache"
+            };
+            using var storage = new RcloneStorage();
+
+            await Assert.ThrowsExactlyAsync<ArgumentException>(
+                () => storage.InitializeAsync(JsonSerializer.Serialize(options), string.Empty));
+        }
+        finally
+        {
+            File.Delete(executablePath);
+            File.Delete(configPath);
+        }
+    }
+
+    [TestMethod]
+    public void CreateProcess_ReadOnly_ServesWithoutAWriteCache()
+    {
+        var options = new RcloneConnectionOptions
+        {
+            RemoteName = "remote",
+            ExecutablePath = "rclone",
+            ConfigPath = "config",
+            IsReadOnly = true
+        };
+
+        using var process = RcloneStorage.CreateProcess(Request(options));
+        var arguments = process.StartInfo.ArgumentList;
+
+        Assert.IsTrue(arguments.Contains("--read-only"));
+        Assert.IsFalse(arguments.Contains("--vfs-cache-mode"),
+            "There is nothing to buffer when nothing can be written.");
+    }
+
+    [TestMethod]
     public void StorageFactory_RcloneAndSsh_ReturnSupportedConnectors()
     {
         using IStorage ssh = StorageFactory.GetStorageConnector(EnumStorageType.SSH);
@@ -150,4 +303,7 @@ public class RcloneStorageTests
             File.Delete(configPath);
         }
     }
+
+    private static RcloneProcessRequest Request(RcloneConnectionOptions options) =>
+        new(options, "remote:", new RcloneEndpoint(2022, "user", "password"), null);
 }
