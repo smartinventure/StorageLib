@@ -525,6 +525,78 @@ namespace StorageLib.Tests.Connectors
         }
 
         [TestMethod]
+        [DataRow("/missing.txt")]
+        [DataRow("/missing_dir/missing.txt")]
+        public async Task TryGetFileInfoAsync_MissingPath_ReturnsNull(string path)
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+
+            var fileInfo = await _storage.TryGetFileInfoAsync(path);
+
+            Assert.IsNull(fileInfo);
+        }
+
+        [TestMethod]
+        public async Task TryGetFileInfoAsync_ExistingFileAndDirectory_ReturnsTheSameAsGetFileInfo()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            await _storage.CreateDirectoryAsync("/try_dir");
+            IntPtr handle = await _storage.OpenAsync("/try_dir/try.txt", OpenFlags.Create | OpenFlags.WriteOnly);
+            await _storage.CloseAsync("/try_dir/try.txt", handle);
+
+            foreach (string path in new[] { "/try_dir", "/try_dir/try.txt" })
+            {
+                var expected = await _storage.GetFileInfoAsync(path);
+                var actual = await _storage.TryGetFileInfoAsync(path);
+
+                Assert.IsNotNull(actual, path);
+                Assert.AreEqual(expected.IsDirectory, actual.IsDirectory, path);
+                Assert.AreEqual(expected.Filename, actual.Filename, path);
+                Assert.AreEqual(expected.Size, actual.Size, path);
+                Assert.AreEqual(expected.LastModified, actual.LastModified, path);
+            }
+        }
+
+        [TestMethod]
+        public async Task FlushToDiskAsync_WrittenFile_LeavesTheDataInTheFile()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            string filePath = "/flush_test.txt";
+            byte[] data = Encoding.UTF8.GetBytes("on the disk before the close");
+            IntPtr handle = await _storage.OpenAsync(filePath, OpenFlags.Create | OpenFlags.ReadWrite);
+            IntPtr buffer = Marshal.AllocHGlobal(data.Length);
+            try
+            {
+                Marshal.Copy(data, 0, buffer, data.Length);
+                await _storage.WriteAsync(filePath, handle, 0, data.Length, buffer);
+
+                await _storage.FlushToDiskAsync(filePath, handle);
+
+                using var reader = new FileStream(Path.Combine(_testBaseDir, "flush_test.txt"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                Assert.AreEqual(data.Length, reader.Length);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+                await _storage.CloseAsync(filePath, handle);
+            }
+        }
+
+        [TestMethod]
+        public async Task FlushToDiskAsync_ReadOnlyHandle_DoesNotThrow()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            string filePath = "/flush_read_only.txt";
+            IntPtr created = await _storage.OpenAsync(filePath, OpenFlags.Create | OpenFlags.WriteOnly);
+            await _storage.CloseAsync(filePath, created);
+            IntPtr handle = await _storage.OpenAsync(filePath, OpenFlags.ReadOnly);
+
+            await _storage.FlushToDiskAsync(filePath, handle);
+
+            await _storage.CloseAsync(filePath, handle);
+        }
+
+        [TestMethod]
         public async Task EnumerateFilesAndDirectoriesAsync_ReturnsCorrectEntries()
         {
             // Arrange
@@ -548,6 +620,40 @@ namespace StorageLib.Tests.Connectors
             Assert.IsNotNull(dirEntry);
             Assert.IsFalse(fileEntry.IsDirectory);
             Assert.IsTrue(dirEntry.IsDirectory);
+        }
+
+        [TestMethod]
+        public async Task ReadDirAsync_FileAndDirectory_ReportTheSameAsGetFileInfo()
+        {
+            await _storage.InitializeAsync(string.Empty, _testBaseDir);
+            await _storage.CreateDirectoryAsync("/listed_dir");
+            byte[] data = Encoding.UTF8.GetBytes("twelve bytes");
+            IntPtr handle = await _storage.OpenAsync("/listed.txt", OpenFlags.Create | OpenFlags.WriteOnly);
+            IntPtr buffer = Marshal.AllocHGlobal(data.Length);
+            try
+            {
+                Marshal.Copy(data, 0, buffer, data.Length);
+                await _storage.WriteAsync("/listed.txt", handle, 0, data.Length, buffer);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+            await _storage.CloseAsync("/listed.txt", handle);
+            await _storage.SetTimesAsync("/listed.txt", new DateTime(2023, 1, 1, 12, 0, 0), new DateTime(2023, 1, 2, 12, 0, 0));
+
+            var entries = (await _storage.ReadDirAsync("/")).ToList();
+
+            foreach (string path in new[] { "/listed.txt", "/listed_dir" })
+            {
+                var expected = await _storage.GetFileInfoAsync(path);
+                var listed = entries.Single(entry => entry.RealPath == path);
+                Assert.AreEqual(expected.Filename, listed.Filename, path);
+                Assert.AreEqual(expected.IsDirectory, listed.IsDirectory, path);
+                Assert.AreEqual(expected.Size, listed.Size, path);
+                Assert.AreEqual(expected.LastModified, listed.LastModified, path);
+            }
+            Assert.AreEqual(data.Length, entries.Single(entry => entry.RealPath == "/listed.txt").Size);
         }
 
         [TestMethod]

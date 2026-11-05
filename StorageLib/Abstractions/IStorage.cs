@@ -86,6 +86,23 @@ namespace StorageLib.Abstractions
         Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// The file or directory at <paramref name="filePath"/>, or null when there is none. Programs ask for
+        /// names that do not exist all the time, and an exception per question costs far more than the question;
+        /// storages that can answer without one override this.
+        /// </summary>
+        async Task<FileObject?> TryGetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return await GetFileInfoAsync(filePath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Delete a file asynchronously
         /// </summary>
         Task DeleteAsync(string filePath, CancellationToken cancellationToken = default);
@@ -134,6 +151,13 @@ namespace StorageLib.Abstractions
         /// Flush pending data for a file handle to storage asynchronously
         /// </summary>
         Task FlushAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Like <see cref="FlushAsync"/>, but returns only once the data is on the storage's disk, as fsync does.
+        /// Storages without such a guarantee to give just flush.
+        /// </summary>
+        Task FlushToDiskAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default) =>
+            FlushAsync(path, fileHandle, cancellationToken);
 
         /// <summary>
         /// Allocate space for a file handle asynchronously (pre-allocation for performance)

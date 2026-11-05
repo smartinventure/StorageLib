@@ -88,9 +88,9 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Open a file asynchronously with the specified flags
         /// </summary>
-        public virtual async Task<IntPtr> OpenAsync(string path, OpenFlags flags, CancellationToken cancellationToken = default)
+        public virtual Task<IntPtr> OpenAsync(string path, OpenFlags flags, CancellationToken cancellationToken = default)
         {
-            return await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 if (string.IsNullOrEmpty(path))
@@ -328,6 +328,32 @@ namespace StorageLib.Connectors
         }
 
         /// <summary>
+        /// Flushes the file and waits until the operating system has written what it still caches of it to the disk.
+        /// </summary>
+        public virtual async Task FlushToDiskAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            if (!_handleMap.TryGetValue(fileHandle, out var handle))
+            {
+                return;
+            }
+
+            try
+            {
+                await handle.Stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                if (handle.Stream is FileStream fileStream)
+                {
+                    fileStream.Flush(flushToDisk: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error flushing file {Path} to disk", handle.Path);
+                throw;
+            }
+        }
+
+        /// <summary>
         /// Allocate space for a file handle asynchronously (pre-allocation for performance)
         /// </summary>
         public virtual async Task FAllocateAsync(string path, IntPtr fileHandle, int mode, long offset, long length, CancellationToken cancellationToken = default)
@@ -434,63 +460,32 @@ namespace StorageLib.Connectors
 
                 string fsPath = GetRealPath(realPath);
                 var fileObjects = new List<FileObject>();
+                var directoryObjects = new List<FileObject>();
 
                 try
                 {
-                    // Enumerate files
-                    foreach (var file in Directory.GetFiles(fsPath))
+                    // The enumeration already carries each entry's size, times and attributes; a new
+                    // FileInfo per entry would ask the file system again for every one of them.
+                    foreach (var entry in new DirectoryInfo(fsPath).EnumerateFileSystemInfos())
                     {
-                        try
+                        bool isDirectory = (entry.Attributes & FileAttributes.Directory) != 0;
+                        string virtualPath = GetVirtualPath(entry.FullName);
+                        var fileObject = new FileObject(virtualPath)
                         {
-                            var fileInfo = new FileInfo(file);
-                            var fileObject = new FileObject(GetVirtualPath(file))
-                            {
-                                Filename = fileInfo.Name,
-                                RealPath = GetVirtualPath(file),
-                                VirtualPath = GetVirtualPath(file),
-                                IsDirectory = false,
-                                Size = fileInfo.Length,
-                                CreationTime = fileInfo.CreationTime,
-                                LastModified = fileInfo.LastWriteTime,
-                                LastAccessTime = fileInfo.LastAccessTime,
-                                SC = this
-                            };
-                            fileObjects.Add(fileObject);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger?.LogWarning(ex, "Error processing file {File}", file);
-                            // Continue with next file
-                        }
+                            Filename = entry.Name,
+                            RealPath = virtualPath,
+                            VirtualPath = virtualPath,
+                            IsDirectory = isDirectory,
+                            Size = entry is FileInfo file ? file.Length : 0,
+                            CreationTime = entry.CreationTime,
+                            LastModified = entry.LastWriteTime,
+                            LastAccessTime = entry.LastAccessTime,
+                            SC = this
+                        };
+                        (isDirectory ? directoryObjects : fileObjects).Add(fileObject);
                     }
 
-                    // Enumerate directories
-                    foreach (var directory in Directory.GetDirectories(fsPath))
-                    {
-                        try
-                        {
-                            var dirInfo = new DirectoryInfo(directory);
-                            var dirObject = new FileObject(GetVirtualPath(directory))
-                            {
-                                Filename = dirInfo.Name,
-                                RealPath = GetVirtualPath(directory),
-                                VirtualPath = GetVirtualPath(directory),
-                                IsDirectory = true,
-                                Size = 0,
-                                CreationTime = dirInfo.CreationTime,
-                                LastModified = dirInfo.LastWriteTime,
-                                LastAccessTime = dirInfo.LastAccessTime,
-                                SC = this
-                            };
-                            fileObjects.Add(dirObject);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger?.LogWarning(ex, "Error processing directory {Directory}", directory);
-                            // Continue with next directory
-                        }
-                    }
-
+                    fileObjects.AddRange(directoryObjects);
                     _logger?.LogDebug("Enumerated {Count} entries in directory: {Path}", fileObjects.Count, fsPath);
                     return fileObjects.AsEnumerable();
                 }
@@ -661,61 +656,64 @@ namespace StorageLib.Connectors
                     throw new ArgumentException("Path cannot be null or empty", nameof(filePath));
 
                 string realPath = GetRealPath(filePath);
-                
-                try
-                {
-                    // One query answers both "does it exist" and all its attributes; FileInfo keeps what it read.
-                    var fileInfo = new FileInfo(realPath);
-                    bool isFile = fileInfo.Exists;
-                    var dirInfo = isFile ? null : new DirectoryInfo(realPath);
-
-                    if (!isFile && !dirInfo!.Exists)
-                    {
-                        throw new FileNotFoundException("The specified path does not exist.", realPath);
-                    }
-
-                    var fileObject = new FileObject(filePath)
-                    {
-                        IsDirectory = !isFile,
-                        RealPath = filePath,
-                        VirtualPath = filePath,
-                        SC = this
-                    };
-
-                    if (isFile)
-                    {
-                        fileObject.Size = fileInfo.Length;
-                        fileObject.CreationTime = fileInfo.CreationTime;
-                        fileObject.LastModified = fileInfo.LastWriteTime;
-                        fileObject.LastAccessTime = fileInfo.LastAccessTime;
-                        fileObject.Filename = fileInfo.Name;
-                    }
-                    else
-                    {
-                        fileObject.CreationTime = dirInfo!.CreationTime;
-                        fileObject.LastModified = dirInfo.LastWriteTime;
-                        fileObject.LastAccessTime = dirInfo.LastAccessTime;
-                        fileObject.Filename = dirInfo.Name;
-                        fileObject.Size = 0;
-                    }
-
-                    _logger?.LogTrace("Retrieved file info for: {Path}", realPath);
-                    return fileObject;
-                }
-                catch (Exception ex) when (!(ex is FileNotFoundException))
-                {
-                    _logger?.LogError(ex, "Error getting file info for {Path}", realPath);
-                    throw;
-                }
+                return ReadFileObject(filePath, realPath)
+                    ?? throw new FileNotFoundException("The specified path does not exist.", realPath);
             }, cancellationToken);
+        }
+
+        public virtual Task<FileObject?> TryGetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
+        {
+            return RunInline(() =>
+            {
+                ThrowIfDisposed();
+                if (string.IsNullOrEmpty(filePath))
+                    throw new ArgumentException("Path cannot be null or empty", nameof(filePath));
+
+                return ReadFileObject(filePath, GetRealPath(filePath));
+            }, cancellationToken);
+        }
+
+        /// <summary>The file or directory at <paramref name="realPath"/>, or null when there is none.</summary>
+        private FileObject? ReadFileObject(string filePath, string realPath)
+        {
+            try
+            {
+                // One query says file, directory or nothing and reads every attribute; FileInfo keeps what it
+                // read, and reports the attributes of a missing path as -1 rather than throwing.
+                var info = new FileInfo(realPath);
+                var attributes = info.Attributes;
+                if ((int)attributes == -1)
+                {
+                    return null;
+                }
+
+                bool isDirectory = attributes.HasFlag(FileAttributes.Directory);
+                return new FileObject(filePath)
+                {
+                    IsDirectory = isDirectory,
+                    RealPath = filePath,
+                    VirtualPath = filePath,
+                    SC = this,
+                    Size = isDirectory ? 0 : info.Length,
+                    CreationTime = info.CreationTime,
+                    LastModified = info.LastWriteTime,
+                    LastAccessTime = info.LastAccessTime,
+                    Filename = isDirectory ? new DirectoryInfo(realPath).Name : info.Name
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error getting file info for {Path}", realPath);
+                throw;
+            }
         }
 
         /// <summary>
         /// Delete a file asynchronously
         /// </summary>
-        public virtual async Task DeleteAsync(string filePath, CancellationToken cancellationToken = default)
+        public virtual Task DeleteAsync(string filePath, CancellationToken cancellationToken = default)
         {
-            await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 if (string.IsNullOrEmpty(filePath))
@@ -742,9 +740,9 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Move/rename a file or directory asynchronously (unified method with auto-detection)
         /// </summary>
-        public virtual async Task MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken cancellationToken = default)
+        public virtual Task MoveAsync(string sourcePath, string destinationPath, bool overwrite, CancellationToken cancellationToken = default)
         {
-            await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 if (string.IsNullOrEmpty(sourcePath))
@@ -846,9 +844,9 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Create a directory asynchronously
         /// </summary>
-        public virtual async Task CreateDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
+        public virtual Task CreateDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
         {
-            await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 if (string.IsNullOrEmpty(directoryPath))
@@ -952,9 +950,9 @@ namespace StorageLib.Connectors
         /// <summary>
         /// Change file ownership asynchronously (no-op for local storage on Windows, limited on Linux)
         /// </summary>
-        public virtual async Task ChownAsync(string path, int uid, int gid, CancellationToken cancellationToken = default)
+        public virtual Task ChownAsync(string path, int uid, int gid, CancellationToken cancellationToken = default)
         {
-            await Task.Run(() =>
+            return RunInline(() =>
             {
                 ThrowIfDisposed();
                 string realPath = GetRealPath(path);
@@ -981,7 +979,7 @@ namespace StorageLib.Connectors
                 return;
             }
 
-            await Task.Run(() =>
+            await RunInline(() =>
             {
                 ThrowIfDisposed();
                 string realPath = GetRealPath(path);
@@ -998,7 +996,7 @@ namespace StorageLib.Connectors
                     _logger?.LogError(ex, "Error setting timestamps for {Path}", realPath);
                     throw;
                 }
-            }, cancellationToken);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1022,9 +1020,28 @@ namespace StorageLib.Connectors
         }
 
         /// <summary>
-        /// Runs a quick metadata query on the calling thread. Handing it to the thread pool cost more than
-        /// the query itself, and the callers wait for the answer anyway.
+        /// Runs a quick file system call on the calling thread. Handing it to the thread pool cost more than
+        /// the call itself, and the callers wait for the answer anyway.
         /// </summary>
+        private static Task RunInline(Action operation, CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled(cancellationToken);
+            }
+
+            try
+            {
+                operation();
+                return Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException(ex);
+            }
+        }
+
+        /// <inheritdoc cref="RunInline(Action, CancellationToken)"/>
         private static Task<T> RunInline<T>(Func<T> query, CancellationToken cancellationToken)
         {
             if (cancellationToken.IsCancellationRequested)
