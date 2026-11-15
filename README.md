@@ -34,7 +34,7 @@ var fileInfo = await localStorage.GetFileInfoAsync("/documents/example.txt");
 - **Azure**: Azure Blob Storage
 - **AWS**: Amazon S3 storage
 - **SSH**: SSH/SFTP storage
-- **OpenSlide**: Virtual whole-slide imaging system
+- **OpenSlide** (deprecated): Virtual whole-slide imaging system — moved to `Deprecated/StorageLib.OpenSlide`, last published as `SmartInVenture.StorageLib.OpenSlide` 2.1.1
 
 ## License
 

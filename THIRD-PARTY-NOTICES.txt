@@ -5,10 +5,11 @@ This product, SmartInVenture.StorageLib, is licensed under the MIT License
 (see the LICENSE file). It additionally bundles and/or depends on third-party
 components that are distributed under their own respective licenses.
 
-Native libraries (in the `libs/` directory)
--------------------------------------------
-The `libs/` directory contains prebuilt native libraries used by the optional
-OpenSlide-based connector, including (but not limited to):
+Native libraries (deprecated OpenSlide connector)
+------------------------------------------------
+The deprecated OpenSlide connector (`Deprecated/StorageLib.OpenSlide`, last
+published as SmartInVenture.StorageLib.OpenSlide 2.1.1) contains prebuilt native
+libraries in its `libs/` directory, including (but not limited to):
 
   - OpenSlide (libopenslide)        - LGPL-2.1
   - cairo (libcairo)                - LGPL-2.1 / MPL-1.1
@@ -30,7 +31,8 @@ Managed (NuGet) dependencies
   - Azure.Storage.Blobs                       - MIT
   - AWSSDK.S3                                  - Apache-2.0
   - SSH.NET                                    - MIT
-  - SixLabors.ImageSharp                       - Six Labors Split License / Apache-2.0
+  - SixLabors.ImageSharp (deprecated OpenSlide connector only)
+                                               - Six Labors Split License / Apache-2.0
   - Microsoft.Extensions.* / System.*         - MIT
   - System.IO.Abstractions                     - MIT
   - PooledGrowableBufferHelper                 - MIT

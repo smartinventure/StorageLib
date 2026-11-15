@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Deprecated: not part of StorageLib.sln and no longer published. The last released package is
+       SmartInVenture.StorageLib.OpenSlide 2.1.1. ImageSharp 3.2+ (which fixes the known advisories
+       against 3.1.x) requires a Six Labors license key at build time. -->
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -31,17 +35,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\StorageLib\StorageLib.csproj" />
+    <ProjectReference Include="..\..\StorageLib\StorageLib.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="PooledGrowableBufferHelper" Version="1.0.14" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.2.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="System.Buffers" Version="4.6.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!-- Native OpenSlide libraries, packed under runtimes\native and copied to consumer output via the .targets below -->

@@ -72,13 +72,6 @@ jobs:
           -p:Version=${{ steps.ver.outputs.version }}
           --output ${{ github.workspace }}/artifacts
 
-      - name: Pack OpenSlide
-        run: >
-          dotnet pack StorageLib.OpenSlide/StorageLib.OpenSlide.csproj
-          --configuration Release --no-build
-          -p:Version=${{ steps.ver.outputs.version }}
-          --output ${{ github.workspace }}/artifacts
-
       - name: Push to nuget.org
         run: >
           dotnet nuget push "${{ github.workspace }}/artifacts/*.nupkg"

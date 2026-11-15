@@ -75,6 +75,7 @@
   both with default implementations.
 - LocalStorage: faster folder listing, reads and writes at explicit offsets.
 - SSH.NET 2026.0.1 (fixes GHSA-mggc-4xg6-vcxf, GHSA-q939-rpr3-3284).
+- SmartInVenture.StorageLib.OpenSlide is deprecated and no longer published; 2.1.1 is its last version.
 
 2.1.0:
 - OpenSlide moved to a separate package: SmartInVenture.StorageLib.OpenSlide
