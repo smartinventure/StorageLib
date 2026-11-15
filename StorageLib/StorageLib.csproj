@@ -71,6 +71,10 @@
 2.2.0:
 - Added production SSH/SFTP and supervised rclone connectors.
 - Added EnumStorageType.Rclone and StorageFactory support.
+- IStorage.TryGetFileInfoAsync (lookup without exceptions) and IStorage.FlushToDiskAsync (fsync),
+  both with default implementations.
+- LocalStorage: faster folder listing, reads and writes at explicit offsets.
+- SSH.NET 2026.0.1 (fixes GHSA-mggc-4xg6-vcxf, GHSA-q939-rpr3-3284).
 
 2.1.0:
 - OpenSlide moved to a separate package: SmartInVenture.StorageLib.OpenSlide
@@ -92,7 +96,7 @@
     <PackageReference Include="AWSSDK.S3" Version="4.0.6.4" />
     
     <!-- Remote Storage Dependencies -->
-    <PackageReference Include="SSH.NET" Version="2025.0.0" />
+    <PackageReference Include="SSH.NET" Version="2026.0.1" />
     
     <!-- Performance and Utilities -->
     <PackageReference Include="System.IO.Abstractions" Version="22.0.15" />
